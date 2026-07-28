@@ -81,14 +81,14 @@ function publicUrl(path: string): string {
   return `${window.location.origin}${path}`;
 }
 
-function IconCopy({ className = "h-4 w-4" }: { className?: string }) {
+function IconCopy({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg
       className={className}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.75"
+      strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
@@ -99,14 +99,14 @@ function IconCopy({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
-function IconDownload({ className = "h-4 w-4" }: { className?: string }) {
+function IconDownload({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg
       className={className}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.75"
+      strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
@@ -118,14 +118,14 @@ function IconDownload({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
-function IconTrash({ className = "h-4 w-4" }: { className?: string }) {
+function IconTrash({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg
       className={className}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.75"
+      strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
@@ -666,7 +666,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 px-0"
+                          className="h-11 w-11 px-0"
                           aria-label={`Copy delivery link for ${file.name}`}
                           title="Copy link"
                           onClick={() => void onCopyDeliveryLink()}
@@ -677,7 +677,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 px-0"
+                          className="h-11 w-11 px-0"
                           aria-label={`Download ${file.name}`}
                           title="Download"
                           disabled={downloadingId === file.id}
@@ -693,7 +693,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                           type="button"
                           variant="danger"
                           size="sm"
-                          className="h-8 w-8 px-0"
+                          className="h-11 w-11 px-0"
                           aria-label={`Delete ${file.name}`}
                           title="Delete"
                           onClick={() => setDeletingFile(file)}
@@ -734,7 +734,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                           type="button"
                           variant="danger"
                           size="sm"
-                          className="h-8 w-8 px-0"
+                          className="h-11 w-11 px-0"
                           aria-label={`Delete ${link.title}`}
                           title="Delete"
                           onClick={() => setDeletingLink(link)}
@@ -753,7 +753,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             <section>
               <h2 className="text-title-3 text-ink">Versions</h2>
               <p className="mt-1 text-body text-ink-secondary">
-                Published deliveries — each has its own client link.
+                Use the copy icon for the client link. Details is only for you.
               </p>
               {versionsLoading ? (
                 <p className="mt-4 text-body text-ink-secondary">Loading versions…</p>
@@ -808,7 +808,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-8 w-8 px-0"
+                              className="h-11 w-11 px-0"
                               aria-label={`Copy link for Version ${version.version_number}`}
                               title="Copy link"
                               onClick={() => void copyText(link)}
@@ -820,7 +820,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                             href={`/projects/${projectId}/history/${version.version_number}`}
                           >
                             <Button type="button" variant="secondary" size="sm">
-                              Open
+                              Details
                             </Button>
                           </Link>
                         </div>

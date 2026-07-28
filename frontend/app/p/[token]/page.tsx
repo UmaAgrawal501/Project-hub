@@ -16,14 +16,14 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function IconDownload({ className = "h-4 w-4" }: { className?: string }) {
+function IconDownload({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg
       className={className}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.75"
+      strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
@@ -43,11 +43,34 @@ function isPdf(file: PublicFile): boolean {
 }
 
 function isImage(file: PublicFile): boolean {
-  return file.mime_type.startsWith("image/");
+  return (
+    file.mime_type.startsWith("image/") ||
+    /\.(png|jpe?g|webp|gif)$/i.test(file.name)
+  );
+}
+
+function isOffice(file: PublicFile): boolean {
+  const name = file.name.toLowerCase();
+  return (
+    name.endsWith(".doc") ||
+    name.endsWith(".docx") ||
+    name.endsWith(".xls") ||
+    name.endsWith(".xlsx") ||
+    name.endsWith(".ppt") ||
+    name.endsWith(".pptx") ||
+    file.mime_type.includes("officedocument") ||
+    file.mime_type === "application/msword" ||
+    file.mime_type === "application/vnd.ms-excel" ||
+    file.mime_type === "application/vnd.ms-powerpoint"
+  );
 }
 
 function canPreview(file: PublicFile): boolean {
-  return isPdf(file) || isImage(file);
+  return isPdf(file) || isImage(file) || isOffice(file);
+}
+
+function officeEmbedUrl(fileUrl: string): string {
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`;
 }
 
 function downloadUrlWithFilename(url: string, filename: string): string {
@@ -71,6 +94,34 @@ function Unavailable() {
       </p>
     </main>
   );
+}
+
+function FilePreview({ file, url }: { file: PublicFile; url: string }) {
+  if (isPdf(file)) {
+    return (
+      <iframe title={file.name} src={url} className="h-[80vh] w-full bg-white" />
+    );
+  }
+  if (isImage(file)) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={url}
+        alt={file.name}
+        className="mx-auto max-h-[80vh] w-auto max-w-full object-contain"
+      />
+    );
+  }
+  if (isOffice(file)) {
+    return (
+      <iframe
+        title={file.name}
+        src={officeEmbedUrl(url)}
+        className="h-[80vh] w-full bg-white"
+      />
+    );
+  }
+  return null;
 }
 
 export default function PublicSharePage() {
@@ -99,7 +150,6 @@ export default function PublicSharePage() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  // Auto-load signed URLs so PDF/images open on the page immediately.
   useEffect(() => {
     if (!token || !data) return;
     const previewable = data.files.filter(canPreview);
@@ -191,11 +241,9 @@ export default function PublicSharePage() {
   const empty = files.length === 0 && resources.length === 0;
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-4xl px-4 py-8 sm:px-6 sm:py-10">
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-title-2 text-ink">{project.name}</h1>
-        </div>
+    <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+      <header className="mb-6">
+        <h1 className="text-title-2 text-ink">{project.name}</h1>
       </header>
 
       {actionError || previewError ? (
@@ -225,7 +273,7 @@ export default function PublicSharePage() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-9 w-9 px-0"
+                className="h-11 w-11 px-0"
                 aria-label={`Download ${file.name}`}
                 title="Download"
                 disabled={busyId === file.id}
@@ -244,19 +292,8 @@ export default function PublicSharePage() {
                 <div className="flex min-h-[70vh] items-center justify-center px-4">
                   <p className="text-body text-ink-secondary">Opening file…</p>
                 </div>
-              ) : isPdf(file) ? (
-                <iframe
-                  title={file.name}
-                  src={url}
-                  className="h-[75vh] w-full bg-white"
-                />
               ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={url}
-                  alt={file.name}
-                  className="mx-auto max-h-[75vh] w-auto max-w-full object-contain"
-                />
+                <FilePreview file={file} url={url} />
               )}
             </div>
           </section>
@@ -284,7 +321,7 @@ export default function PublicSharePage() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="h-9 w-9 px-0"
+                  className="h-11 w-11 px-0"
                   aria-label={`Download ${file.name}`}
                   title="Download"
                   disabled={busyId === file.id}
