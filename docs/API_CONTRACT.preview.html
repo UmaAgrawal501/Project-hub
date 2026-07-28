@@ -1,0 +1,2252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ProjectHub API Contract</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 920px; margin: 32px auto; padding: 0 20px 80px; line-height: 1.5; background: #0b0d10; color: #eceff3; }
+  h1,h2,h3 { line-height: 1.25; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+  pre { background: #161a21; padding: 12px 14px; border-radius: 8px; overflow-x: auto; border: 1px solid #2a313c; }
+  code { background: #161a21; padding: 1px 5px; border-radius: 4px; }
+  pre code { background: transparent; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; font-size: 14px; }
+  th, td { border: 1px solid #2a313c; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #12151a; }
+  tr:nth-child(even) td { background: #12151a80; }
+  a { color: #3db8a8; }
+  hr { border: none; border-top: 1px solid #2a313c; margin: 28px 0; }
+</style>
+</head>
+<body>
+<h1>ProjectHub — API Contract (Version 1)</h1>
+<p><strong>Status:</strong> Draft for review<br><strong>Audience:</strong> Frontend and backend engineering<br><strong>Role:</strong> Single source of truth for the HTTP API between client and server<br><strong>Scope:</strong> Contract only — no application code, SQL, ORM, or vendor SDK usage  </p>
+<p><strong>Frozen inputs (do not contradict):</strong></p>
+<ul>
+<li><code>docs/PRD.md</code></li>
+<li><code>docs/UX.md</code></li>
+<li><code>docs/DESIGN_SYSTEM.md</code></li>
+<li><code>docs/DATA_MODEL.md</code></li>
+</ul>
+<p><strong>Base URL:</strong> <code>/api/v1</code><br><strong>Protocols:</strong> HTTPS only in production<br><strong>Format:</strong> JSON (<code>Content-Type: application/json</code>) unless noted for upload binary transfer to object storage</p>
+<hr>
+<h1>1. API Design Principles</h1>
+<h2>Style</h2>
+<ul>
+<li>RESTful resource-oriented routes</li>
+<li>JSON request and response bodies</li>
+<li>UUID string identifiers for all entity ids</li>
+<li>All timestamps are ISO-8601 UTC with <code>Z</code> suffix (example: <code>2026-07-28T07:30:00Z</code>)</li>
+<li>snake_case for JSON fields</li>
+<li>Plural collection nouns (<code>/projects</code>, <code>/files</code>)</li>
+<li>No RPC-style verbs in paths except where product actions are not CRUD (<code>/share/enable</code>, password flows)</li>
+</ul>
+<h2>Consistent success envelope</h2>
+<p>Every successful response uses:</p>
+<pre><code class="language-json">{
+  &quot;data&quot;: {}
+}
+</code></pre>
+<ul>
+<li>Single resource: <code>data</code> is an object</li>
+<li>Collections: <code>data</code> is an array</li>
+<li>Optional pagination meta (when used):</li>
+</ul>
+<pre><code class="language-json">{
+  &quot;data&quot;: [],
+  &quot;meta&quot;: {
+    &quot;limit&quot;: 50,
+    &quot;offset&quot;: 0,
+    &quot;total&quot;: 12
+  }
+}
+</code></pre>
+<p>No success message string required when <code>data</code> is sufficient.</p>
+<h2>Consistent error envelope</h2>
+<p>Every error response uses:</p>
+<pre><code class="language-json">{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;string_error_code&quot;,
+    &quot;message&quot;: &quot;Human-readable summary&quot;,
+    &quot;details&quot;: []
+  }
+}
+</code></pre>
+<p><code>details</code> is an array of field errors when applicable:</p>
+<pre><code class="language-json">{
+  &quot;field&quot;: &quot;name&quot;,
+  &quot;message&quot;: &quot;Name is required&quot;,
+  &quot;code&quot;: &quot;required&quot;
+}
+</code></pre>
+<p><code>details</code> may be an empty array.</p>
+<h2>HTTP status codes</h2>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>200</code></td>
+<td>OK — read or update success</td>
+</tr>
+<tr>
+<td><code>201</code></td>
+<td>Created</td>
+</tr>
+<tr>
+<td><code>204</code></td>
+<td>No Content — successful delete with empty body (allowed alternative: <code>200</code> + <code>{ &quot;data&quot;: { &quot;ok&quot;: true } }</code>; **V1 standard: <code>200</code> + <code>{ &quot;data&quot;: { &quot;ok&quot;: true } }</code> for JSON clients)</td>
+</tr>
+<tr>
+<td><code>400</code></td>
+<td>Validation / bad request</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td>Unauthenticated</td>
+</tr>
+<tr>
+<td><code>403</code></td>
+<td>Authenticated but not allowed</td>
+</tr>
+<tr>
+<td><code>404</code></td>
+<td>Resource not found (or not visible)</td>
+</tr>
+<tr>
+<td><code>409</code></td>
+<td>Conflict (duplicate email, state conflict)</td>
+</tr>
+<tr>
+<td><code>413</code></td>
+<td>Payload too large (file)</td>
+</tr>
+<tr>
+<td><code>415</code></td>
+<td>Unsupported media type (file)</td>
+</tr>
+<tr>
+<td><code>429</code></td>
+<td>Rate limited</td>
+</tr>
+<tr>
+<td><code>500</code></td>
+<td>Internal error (no internal details exposed)</td>
+</tr>
+</tbody></table>
+<h2>Authentication strategy</h2>
+<ul>
+<li><p>Owner identity is provided by <strong>Supabase Auth</strong> (see Data Model).</p>
+</li>
+<li><p>Private endpoints require header:</p>
+<p><code>Authorization: Bearer {access_token}</code></p>
+</li>
+<li><p>The API validates the access token, resolves the application <code>users</code> profile and the owner’s single <code>workspaces</code> row.</p>
+</li>
+<li><p>Auth endpoints in this contract are part of the <strong>backend API surface</strong> so the frontend has one contract. The backend is responsible for integrating with the identity provider; clients do not need a second API style for V1.</p>
+</li>
+</ul>
+<h2>Authorization rules</h2>
+<table>
+<thead>
+<tr>
+<th>Actor</th>
+<th>Access</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Owner (valid Bearer token)</td>
+<td>Full CRUD within <strong>own workspace</strong> only</td>
+</tr>
+<tr>
+<td>Client (no account)</td>
+<td>Read-only via <strong>share token</strong> on public routes only</td>
+</tr>
+<tr>
+<td>Anyone else</td>
+<td>Denied</td>
+</tr>
+</tbody></table>
+<p>Rules:</p>
+<ol>
+<li>Workspace isolation: every private project/file/resource/progress/share mutation must verify <code>project.workspace_id</code> belongs to the token user’s workspace.</li>
+<li>Soft-deleted projects (<code>deleted_at</code> set) are invisible on private list/get except where explicitly documented; public routes never resolve them.</li>
+<li>Share public routes require <code>project_shares.is_enabled = true</code> and a matching token.</li>
+<li>Clients never receive owner-only fields beyond the public models defined below.</li>
+<li>Storage paths are <strong>never</strong> returned in any response.</li>
+</ol>
+<hr>
+<h1>2. Authentication APIs</h1>
+<h2>2.1 Sign Up</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/auth/sign-up</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Create owner account, profile, and personal workspace</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>No</td>
+</tr>
+</tbody></table>
+<p><strong>Request body</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Rules</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>display_name</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>1–80 chars</td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Valid email</td>
+</tr>
+<tr>
+<td><code>password</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Min length per security policy (min 8)</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>201</code></strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: {
+    &quot;user&quot;: { &quot;...User...&quot; },
+    &quot;workspace&quot;: { &quot;...Workspace...&quot; },
+    &quot;session&quot;: {
+      &quot;access_token&quot;: &quot;string&quot;,
+      &quot;refresh_token&quot;: &quot;string&quot;,
+      &quot;expires_in&quot;: 3600,
+      &quot;token_type&quot;: &quot;bearer&quot;
+    }
+  }
+}
+</code></pre>
+<p><strong>Errors</strong></p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Code</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>400</code></td>
+<td><code>validation_error</code></td>
+<td>Invalid fields</td>
+</tr>
+<tr>
+<td><code>409</code></td>
+<td><code>email_taken</code></td>
+<td>Email already registered</td>
+</tr>
+<tr>
+<td><code>429</code></td>
+<td><code>rate_limited</code></td>
+<td>Too many attempts</td>
+</tr>
+<tr>
+<td><code>500</code></td>
+<td><code>internal_error</code></td>
+<td>Unexpected failure</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>2.2 Sign In</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/auth/sign-in</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Authenticate owner and return session</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>No</td>
+</tr>
+</tbody></table>
+<p><strong>Request body</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>email</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>password</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code></strong></p>
+<p>Same shape as Sign Up (<code>user</code>, <code>workspace</code>, <code>session</code>).</p>
+<p><strong>Errors</strong></p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Code</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>400</code></td>
+<td><code>validation_error</code></td>
+<td>Missing fields</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td><code>invalid_credentials</code></td>
+<td>Email/password incorrect (generic message)</td>
+</tr>
+<tr>
+<td><code>429</code></td>
+<td><code>rate_limited</code></td>
+<td>Too many attempts</td>
+</tr>
+<tr>
+<td><code>500</code></td>
+<td><code>internal_error</code></td>
+<td>Unexpected failure</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>2.3 Sign Out</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/auth/sign-out</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Invalidate current session / refresh credential as applicable</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Request body:</strong> empty object <code>{}</code> or none.</p>
+<p><strong>Success <code>200</code></strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: { &quot;ok&quot;: true }
+}
+</code></pre>
+<p><strong>Errors:</strong> <code>401</code> <code>unauthorized</code>; <code>500</code> <code>internal_error</code></p>
+<hr>
+<h2>2.4 Forgot Password</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/auth/forgot-password</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Request password reset email</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>No</td>
+</tr>
+</tbody></table>
+<p><strong>Request body</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>email</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code></strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: {
+    &quot;ok&quot;: true,
+    &quot;message&quot;: &quot;If an account exists for this email, a reset link has been sent.&quot;
+  }
+}
+</code></pre>
+<p>Always returns the same success shape whether or not the email exists (anti-enumeration).</p>
+<p><strong>Errors:</strong> <code>400</code> <code>validation_error</code>; <code>429</code> <code>rate_limited</code>; <code>500</code> <code>internal_error</code></p>
+<hr>
+<h2>2.5 Reset Password</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/auth/reset-password</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Set a new password using the reset token from email</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>No (token in body)</td>
+</tr>
+</tbody></table>
+<p><strong>Request body</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>token</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>password</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code></strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: { &quot;ok&quot;: true }
+}
+</code></pre>
+<p><strong>Errors:</strong> <code>400</code> <code>validation_error</code>; <code>400</code> <code>invalid_or_expired_token</code>; <code>429</code> <code>rate_limited</code>; <code>500</code> <code>internal_error</code></p>
+<hr>
+<h2>2.6 Get Current User</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>GET</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/auth/me</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Return authenticated user and workspace</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code></strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: {
+    &quot;user&quot;: { &quot;...User...&quot; },
+    &quot;workspace&quot;: { &quot;...Workspace...&quot; }
+  }
+}
+</code></pre>
+<p><strong>Errors:</strong> <code>401</code> <code>unauthorized</code>; <code>500</code> <code>internal_error</code></p>
+<hr>
+<h2>2.7 Update Current User (Settings)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>PATCH</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/auth/me</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Update display name (Settings)</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Request body</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>display_name</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;user&quot;: { &quot;...User...&quot; } } }</code></p>
+<p><strong>Errors:</strong> <code>400</code> <code>validation_error</code>; <code>401</code> <code>unauthorized</code>; <code>500</code> <code>internal_error</code></p>
+<hr>
+<h2>2.8 Change Password (Settings)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/auth/change-password</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Change password while authenticated</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Request body</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>current_password</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>new_password</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;ok&quot;: true } }</code></p>
+<p><strong>Errors:</strong> <code>400</code> <code>validation_error</code>; <code>401</code> <code>unauthorized</code> / <code>invalid_credentials</code>; <code>500</code> <code>internal_error</code></p>
+<hr>
+<h1>3. Project APIs</h1>
+<p>All project routes: <strong>Auth required: Yes</strong>, private, workspace-scoped.<br>Soft-deleted projects are excluded from list/get unless noted.<br><code>DELETE</code> performs soft delete (<code>deleted_at</code>) and disables sharing.</p>
+<p>Status transitions (Complete / Archive / Restore) use <code>PATCH</code> with <code>status</code>. There are no separate <code>/archive</code> routes.</p>
+<table>
+<thead>
+<tr>
+<th>Semantic (UX)</th>
+<th>API</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Complete</td>
+<td><code>PATCH</code> <code>{ &quot;status&quot;: &quot;completed&quot; }</code></td>
+</tr>
+<tr>
+<td>Archive</td>
+<td><code>PATCH</code> <code>{ &quot;status&quot;: &quot;archived&quot; }</code></td>
+</tr>
+<tr>
+<td>Restore to Active</td>
+<td><code>PATCH</code> <code>{ &quot;status&quot;: &quot;active&quot; }</code></td>
+</tr>
+<tr>
+<td>Mark Active (from Completed)</td>
+<td><code>PATCH</code> <code>{ &quot;status&quot;: &quot;active&quot; }</code></td>
+</tr>
+</tbody></table>
+<hr>
+<h2>3.1 List Projects</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>GET</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/projects</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>List owner projects for dashboard filters</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Query</strong></p>
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>status</code></td>
+<td>string</td>
+<td>No</td>
+<td><code>active</code></td>
+<td>One of: active, completed, archived</td>
+</tr>
+<tr>
+<td><code>limit</code></td>
+<td>int</td>
+<td>No</td>
+<td><code>50</code></td>
+<td>Max <code>100</code></td>
+</tr>
+<tr>
+<td><code>offset</code></td>
+<td>int</td>
+<td>No</td>
+<td><code>0</code></td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Only projects with <code>deleted_at = null</code>.</p>
+<p><strong>Success <code>200</code></strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: [ { &quot;...ProjectSummary...&quot; } ],
+  &quot;meta&quot;: { &quot;limit&quot;: 50, &quot;offset&quot;: 0, &quot;total&quot;: 3 }
+}
+</code></pre>
+<p>Default sort: <code>updated_at</code> descending.</p>
+<p><strong>Errors:</strong> <code>400</code> <code>validation_error</code>; <code>401</code> <code>unauthorized</code>; <code>500</code> <code>internal_error</code></p>
+<hr>
+<h2>3.2 Create Project</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/projects</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Create project (<code>status=active</code>)</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Request body</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Rules</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>1–120 chars</td>
+</tr>
+<tr>
+<td><code>overview</code></td>
+<td>string</td>
+<td>No</td>
+<td>Max 10_000 chars</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>201</code></strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: { &quot;...Project...&quot; }
+}
+</code></pre>
+<p>Share row is <strong>not</strong> required at create (lazy on first enable).</p>
+<p><strong>Errors:</strong> <code>400</code> <code>validation_error</code>; <code>401</code> <code>unauthorized</code>; <code>500</code> <code>internal_error</code></p>
+<hr>
+<h2>3.3 Get Project</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>GET</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/projects/{project_id}</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Get project detail for workspace shell / Overview</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;...Project...&quot; } }</code><br>May include nested <code>share</code> summary when a share row exists (see <code>Share</code> model); if none, <code>share: null</code>.</p>
+<p><strong>Errors:</strong> <code>401</code>; <code>403</code> (other workspace); <code>404</code> (missing or soft-deleted); <code>500</code></p>
+<hr>
+<h2>3.4 Update Project (Overview / Status)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>PATCH</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/projects/{project_id}</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Update name, overview, and/or status</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Request body</strong> (at least one field)</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Rules</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>No</td>
+<td>1–120 chars</td>
+</tr>
+<tr>
+<td><code>overview</code></td>
+<td>string or null</td>
+<td>No</td>
+<td>Max 10_000; <code>null</code> clears</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>string</td>
+<td>No</td>
+<td><code>active</code> or <code>completed</code> or <code>archived</code></td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;...Project...&quot; } }</code></p>
+<p><strong>Errors:</strong> <code>400</code>; <code>401</code>; <code>403</code>; <code>404</code>; <code>500</code></p>
+<hr>
+<h2>3.5 Delete Project (Soft Delete)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>DELETE</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/projects/{project_id}</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Soft-delete project; force-disable share</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;ok&quot;: true } }</code></p>
+<p><strong>Side effects (contractual):</strong> set <code>deleted_at</code>; if share exists, set <code>is_enabled=false</code>.</p>
+<p><strong>Errors:</strong> <code>401</code>; <code>403</code>; <code>404</code>; <code>500</code></p>
+<hr>
+<h1>4. File APIs</h1>
+<p>Private, auth required, project ownership required.<br>Upload uses a <strong>signed upload URL</strong> flow so browsers put bytes directly to object storage. The API never returns <code>storage_path</code>.</p>
+<h2>4.1 V1 platform limits</h2>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Max file size</td>
+<td>25 MiB</td>
+</tr>
+<tr>
+<td>Max files per project</td>
+<td>50</td>
+</tr>
+<tr>
+<td>Allowed MIME types</td>
+<td>See list below</td>
+</tr>
+</tbody></table>
+<p><strong>Allowed MIME types</strong></p>
+<ul>
+<li><code>application/pdf</code></li>
+<li><code>image/png</code></li>
+<li><code>image/jpeg</code></li>
+<li><code>image/webp</code></li>
+<li><code>image/gif</code></li>
+<li><code>application/zip</code></li>
+<li><code>application/msword</code></li>
+<li><code>application/vnd.openxmlformats-officedocument.wordprocessingml.document</code></li>
+<li><code>application/vnd.ms-excel</code></li>
+<li><code>application/vnd.openxmlformats-officedocument.spreadsheetml.sheet</code></li>
+<li><code>text/plain</code></li>
+</ul>
+<p>Reject with <code>413</code> / <code>415</code> / <code>400</code> as appropriate before or at confirm time.</p>
+<hr>
+<h2>4.2 List Files</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>GET</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/projects/{project_id}/files</code></td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: [ { &quot;...File...&quot; } ] }</code><br>Sort: <code>created_at</code> descending.</p>
+<p><strong>Errors:</strong> <code>401</code>; <code>403</code>; <code>404</code> (project); <code>500</code></p>
+<hr>
+<h2>4.3 Create Upload Intent (Signed Upload URL)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/projects/{project_id}/files/upload-url</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Validate limits and return a short-lived signed upload URL</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Request body</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Rules</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Original filename, 1–255 chars</td>
+</tr>
+<tr>
+<td><code>mime_type</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Must be allowed</td>
+</tr>
+<tr>
+<td><code>size_bytes</code></td>
+<td>integer</td>
+<td>Yes</td>
+<td>1..25 MiB</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code></strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: {
+    &quot;upload_url&quot;: &quot;https://signed-upload-url&quot;,
+    &quot;upload_token&quot;: &quot;opaque_string_for_confirm&quot;,
+    &quot;expires_at&quot;: &quot;2026-07-28T07:35:00Z&quot;,
+    &quot;required_headers&quot;: {
+      &quot;Content-Type&quot;: &quot;application/pdf&quot;
+    }
+  }
+}
+</code></pre>
+<p>Notes:</p>
+<ul>
+<li><code>upload_token</code> is an opaque server-issued value bound to project + declared metadata (not a storage path).</li>
+<li>Client uploads binary to <code>upload_url</code> using the method required by storage (typically <code>PUT</code>).</li>
+<li>This response must not include bucket keys or storage paths.</li>
+</ul>
+<p><strong>Errors</strong></p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Code</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>400</code></td>
+<td><code>validation_error</code></td>
+<td>Bad metadata</td>
+</tr>
+<tr>
+<td><code>403</code> / <code>404</code></td>
+<td></td>
+<td>Project access</td>
+</tr>
+<tr>
+<td><code>409</code></td>
+<td><code>file_limit_reached</code></td>
+<td>Already 50 files</td>
+</tr>
+<tr>
+<td><code>413</code></td>
+<td><code>file_too_large</code></td>
+<td>Size over limit</td>
+</tr>
+<tr>
+<td><code>415</code></td>
+<td><code>unsupported_media_type</code></td>
+<td>MIME not allowed</td>
+</tr>
+<tr>
+<td><code>500</code></td>
+<td><code>internal_error</code></td>
+<td></td>
+</tr>
+</tbody></table>
+<hr>
+<h2>4.4 Confirm Upload</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/projects/{project_id}/files/confirm</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>After successful storage upload, persist file metadata</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Request body</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>upload_token</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>mime_type</code></td>
+<td>string</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>size_bytes</code></td>
+<td>integer</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p>Server verifies object exists, size/MIME match intent, enforces limits, creates <code>files</code> row.</p>
+<p><strong>Success <code>201</code>:</strong> <code>{ &quot;data&quot;: { &quot;...File...&quot; } }</code></p>
+<p><strong>Errors:</strong> <code>400</code> <code>validation_error</code> / <code>upload_not_found</code> / <code>upload_mismatch</code>; <code>409</code> <code>file_limit_reached</code>; <code>401</code>; <code>403</code>; <code>404</code>; <code>500</code></p>
+<hr>
+<h2>4.5 Get Download URL (Owner)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/projects/{project_id}/files/{file_id}/download-url</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Issue short-lived signed download URL for owner</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Request body:</strong> none / <code>{}</code></p>
+<p><strong>Success <code>200</code></strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: {
+    &quot;download_url&quot;: &quot;https://signed-download-url&quot;,
+    &quot;expires_at&quot;: &quot;2026-07-28T07:35:00Z&quot;,
+    &quot;name&quot;: &quot;Proposal.pdf&quot;
+  }
+}
+</code></pre>
+<p><strong>Errors:</strong> <code>401</code>; <code>403</code>; <code>404</code>; <code>500</code></p>
+<hr>
+<h2>4.6 Delete File</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>DELETE</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/projects/{project_id}/files/{file_id}</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Hard-delete metadata and storage object</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;ok&quot;: true } }</code></p>
+<p><strong>Errors:</strong> <code>401</code>; <code>403</code>; <code>404</code>; <code>500</code></p>
+<hr>
+<h2>4.7 Signed URL flow (summary)</h2>
+<ol>
+<li><code>POST .../files/upload-url</code> → client receives <code>upload_url</code> + <code>upload_token</code>  </li>
+<li>Client uploads bytes to <code>upload_url</code>  </li>
+<li><code>POST .../files/confirm</code> → <code>File</code> resource  </li>
+<li>Download anytime via <code>POST .../download-url</code> (owner) or public download endpoint (client)</li>
+</ol>
+<hr>
+<h1>5. Resource APIs</h1>
+<p>Auth required. Ownership required.</p>
+<p><strong>Validation</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rules</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>title</code></td>
+<td>Required, 1–120 chars</td>
+</tr>
+<tr>
+<td><code>url</code></td>
+<td>Required, <code>http</code> or <code>https</code> URL, max 2048 chars</td>
+</tr>
+<tr>
+<td><code>type</code></td>
+<td>Required enum: <code>github</code>, <code>figma</code>, <code>production</code>, <code>staging</code>, <code>api_docs</code>, <code>postman</code>, <code>database_diagram</code>, <code>drive</code>, <code>other</code></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>Optional, max 2000 chars</td>
+</tr>
+<tr>
+<td><code>position</code></td>
+<td>Integer ≥ 0; used for ordering</td>
+</tr>
+</tbody></table>
+<p><strong>Ordering:</strong> List ascending by <code>position</code>, then <code>created_at</code> ascending as tiebreaker.</p>
+<hr>
+<h2>5.1 List Resources</h2>
+<p><code>GET /api/v1/projects/{project_id}/resources</code> → <code>200</code> <code>{ &quot;data&quot;: [ Resource ] }</code></p>
+<hr>
+<h2>5.2 Create Resource</h2>
+<p><code>POST /api/v1/projects/{project_id}/resources</code></p>
+<p><strong>Body:</strong> <code>title</code>, <code>url</code>, <code>type</code>, <code>description?</code><br>If <code>position</code> omitted, append to end (max existing position + 1).</p>
+<p><strong>Success <code>201</code>:</strong> <code>{ &quot;data&quot;: { Resource } }</code></p>
+<hr>
+<h2>5.3 Update Resource</h2>
+<p><code>PATCH /api/v1/projects/{project_id}/resources/{resource_id}</code></p>
+<p><strong>Body:</strong> any of <code>title</code>, <code>url</code>, <code>type</code>, <code>description</code>, <code>position</code></p>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { Resource } }</code></p>
+<hr>
+<h2>5.4 Delete Resource</h2>
+<p><code>DELETE /api/v1/projects/{project_id}/resources/{resource_id}</code><br><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;ok&quot;: true } }</code><br>Hard delete.</p>
+<hr>
+<h2>5.5 Reorder Resources (optional convenience)</h2>
+<p><code>PUT /api/v1/projects/{project_id}/resources/order</code></p>
+<p><strong>Body:</strong></p>
+<pre><code class="language-json">{
+  &quot;resource_ids&quot;: [&quot;uuid&quot;, &quot;uuid&quot;]
+}
+</code></pre>
+<p>Must include every resource id for the project exactly once. Assigns <code>position</code> by array index.</p>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: [ Resource ] }</code></p>
+<p><strong>Errors:</strong> <code>400</code> if set mismatch.</p>
+<blockquote>
+<p>If V1 frontend only edits <code>position</code> via PATCH, this endpoint may be deferred; both are allowed by contract. Prefer implementing <strong>PATCH position</strong> minimum; add reorder endpoint if drag-and-drop ships.</p>
+</blockquote>
+<hr>
+<h1>6. Progress APIs</h1>
+<p>Auth required. Ownership required.</p>
+<p><strong>Validation</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rules</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>title</code></td>
+<td>Required, 1–160 chars</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>Required, 1–10_000 chars</td>
+</tr>
+</tbody></table>
+<p><strong>Ordering:</strong> <code>created_at</code> descending (newest first). Edits do not change sort key.</p>
+<hr>
+<h2>6.1 List Progress</h2>
+<p><code>GET /api/v1/projects/{project_id}/progress</code><br><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: [ ProgressEntry ] }</code></p>
+<hr>
+<h2>6.2 Create Progress</h2>
+<p><code>POST /api/v1/projects/{project_id}/progress</code><br><strong>Body:</strong> <code>title</code>, <code>description</code><br><strong>Success <code>201</code>:</strong> <code>{ &quot;data&quot;: { ProgressEntry } }</code></p>
+<hr>
+<h2>6.3 Update Progress</h2>
+<p><code>PATCH /api/v1/projects/{project_id}/progress/{progress_id}</code><br><strong>Body:</strong> <code>title?</code>, <code>description?</code> (at least one)<br><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { ProgressEntry } }</code></p>
+<hr>
+<h2>6.4 Delete Progress</h2>
+<p><code>DELETE /api/v1/projects/{project_id}/progress/{progress_id}</code><br><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;ok&quot;: true } }</code><br>Hard delete.</p>
+<hr>
+<h1>7. Share APIs</h1>
+<h2>Private share management (owner)</h2>
+<h3>7.1 Get Share State</h3>
+<p><code>GET /api/v1/projects/{project_id}/share</code><br><strong>Auth:</strong> Yes  </p>
+<p><strong>Success <code>200</code></strong></p>
+<ul>
+<li>If no row yet: <code>{ &quot;data&quot;: { &quot;enabled&quot;: false, &quot;share&quot;: null } }</code></li>
+<li>If row exists: <code>{ &quot;data&quot;: { &quot;enabled&quot;: true|false, &quot;share&quot;: { Share } } }</code></li>
+</ul>
+<hr>
+<h3>7.2 Enable Sharing</h3>
+<p><code>POST /api/v1/projects/{project_id}/share/enable</code><br><strong>Auth:</strong> Yes<br><strong>Body:</strong> none / <code>{}</code></p>
+<p><strong>Behavior</strong></p>
+<ul>
+<li>If no row: create <code>project_shares</code> with new token, <code>is_enabled=true</code> (lazy create)</li>
+<li>If row exists: set <code>is_enabled=true</code> (token unchanged)</li>
+<li>Reject if project soft-deleted</li>
+</ul>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;share&quot;: { Share } } }</code></p>
+<p><strong>Errors:</strong> <code>404</code>; <code>409</code> <code>project_deleted</code>; <code>401</code>; <code>403</code>; <code>500</code></p>
+<hr>
+<h3>7.3 Disable Sharing</h3>
+<p><code>POST /api/v1/projects/{project_id}/share/disable</code><br><strong>Auth:</strong> Yes  </p>
+<p>Sets <code>is_enabled=false</code>. Token retained until regenerate.</p>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;share&quot;: { Share } } }</code><br><strong>Errors:</strong> <code>404</code> if no share row yet (<code>share_not_initialized</code>); <code>401</code>; <code>403</code>; <code>500</code></p>
+<hr>
+<h3>7.4 Regenerate Token</h3>
+<p><code>POST /api/v1/projects/{project_id}/share/regenerate</code><br><strong>Auth:</strong> Yes  </p>
+<p>Issues new token; previous token invalid immediately; sets <code>is_enabled=true</code>.</p>
+<p><strong>Success <code>200</code>:</strong> <code>{ &quot;data&quot;: { &quot;share&quot;: { Share } } }</code><br><strong>Errors:</strong> <code>404</code> if never enabled (<code>share_not_initialized</code>); <code>401</code>; <code>403</code>; <code>500</code></p>
+<hr>
+<h2>Public share access (client, no auth)</h2>
+<p>Public path prefix: <code>/api/v1/public</code></p>
+<h3>7.5 Get Public Project</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>GET</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/public/{token}</code></td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Full read-only workspace payload for Public Share Page</td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>No</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code></strong></p>
+<pre><code class="language-json">{
+  &quot;data&quot;: {
+    &quot;project&quot;: { &quot;...PublicProject...&quot; },
+    &quot;resources&quot;: [ { &quot;...PublicResource...&quot; } ],
+    &quot;progress&quot;: [ { &quot;...PublicProgressEntry...&quot; } ],
+    &quot;files&quot;: [ { &quot;...PublicFile...&quot; } ]
+  }
+}
+</code></pre>
+<p><strong>Section order for clients (UX):</strong> Overview (in <code>project</code>) → Progress → Resources → Files.<br>API may return objects in any key order; frontend renders per UX.</p>
+<p><strong>Errors</strong></p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Code</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>404</code></td>
+<td><code>share_unavailable</code></td>
+<td>Unknown token, disabled, regenerated old token, or project soft-deleted</td>
+</tr>
+</tbody></table>
+<p>Message should match UX: link no longer active — do not leak whether project exists.</p>
+<hr>
+<h3>7.6 Public File Download URL</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Method</strong></td>
+<td><code>POST</code></td>
+</tr>
+<tr>
+<td><strong>Route</strong></td>
+<td><code>/api/v1/public/{token}/files/{file_id}/download-url</code></td>
+</tr>
+<tr>
+<td><strong>Auth required</strong></td>
+<td>No</td>
+</tr>
+</tbody></table>
+<p><strong>Success <code>200</code>:</strong> same shape as owner download URL (<code>download_url</code>, <code>expires_at</code>, <code>name</code>)</p>
+<p><strong>Errors:</strong> <code>404</code> <code>share_unavailable</code> or file not in project; <code>500</code></p>
+<p>No list/upload/delete on public API beyond this contract.</p>
+<hr>
+<h1>8. Response Models</h1>
+<p>Fields marked optional may be <code>null</code>.</p>
+<h2>User</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>display_name</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>datetime</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>datetime</td>
+</tr>
+</tbody></table>
+<h2>Workspace</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>datetime</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>datetime</td>
+</tr>
+</tbody></table>
+<h2>Project</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>workspace_id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>overview</code></td>
+<td>string or null</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>active</code> or <code>completed</code> or <code>archived</code></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>datetime</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>datetime</td>
+</tr>
+<tr>
+<td><code>share</code></td>
+<td>Share or null (on get detail only; omit on list)</td>
+</tr>
+</tbody></table>
+<h2>ProjectSummary</h2>
+<p>Same as Project <strong>without</strong> <code>share</code>. Used in list endpoints.</p>
+<h2>File</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>project_id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>mime_type</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>size_bytes</code></td>
+<td>integer</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>datetime</td>
+</tr>
+</tbody></table>
+<p><strong>Never include:</strong> <code>storage_path</code>, bucket names, internal keys.</p>
+<h2>Resource</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>project_id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>url</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>type</code></td>
+<td>resource type enum</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string or null</td>
+</tr>
+<tr>
+<td><code>position</code></td>
+<td>integer</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>datetime</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>datetime</td>
+</tr>
+</tbody></table>
+<h2>ProgressEntry</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>project_id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>datetime</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>datetime</td>
+</tr>
+</tbody></table>
+<h2>Share</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>project_id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>token</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>is_enabled</code></td>
+<td>boolean</td>
+</tr>
+<tr>
+<td><code>public_path</code></td>
+<td>string (relative route such as <code>/p/</code> + token)</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>datetime</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>datetime</td>
+</tr>
+</tbody></table>
+<p>Absolute public site origin is a frontend/env concern; API provides <code>token</code> + <code>public_path</code>.</p>
+<h2>PublicProject</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>name</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>overview</code></td>
+<td>string or null</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>active</code> or <code>completed</code> or <code>archived</code></td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>datetime</td>
+</tr>
+</tbody></table>
+<p>No ids required for public project shell; optional <code>id</code> <strong>omitted</strong> in V1 public model to reduce leakage. Files/resources/progress still use ids for download/open actions.</p>
+<h2>PublicFile</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>mime_type</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>size_bytes</code></td>
+<td>integer</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>datetime</td>
+</tr>
+</tbody></table>
+<h2>PublicResource</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>url</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>type</code></td>
+<td>enum</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string or null</td>
+</tr>
+<tr>
+<td><code>position</code></td>
+<td>integer</td>
+</tr>
+</tbody></table>
+<h2>PublicProgressEntry</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>uuid string</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>datetime</td>
+</tr>
+</tbody></table>
+<h2>Session</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>access_token</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>refresh_token</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>expires_in</code></td>
+<td>integer (seconds)</td>
+</tr>
+<tr>
+<td><code>token_type</code></td>
+<td><code>&quot;bearer&quot;</code></td>
+</tr>
+</tbody></table>
+<hr>
+<h1>9. Error Models</h1>
+<h2>Standard error schema</h2>
+<pre><code class="language-json">{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;string&quot;,
+    &quot;message&quot;: &quot;string&quot;,
+    &quot;details&quot;: [
+      {
+        &quot;field&quot;: &quot;string&quot;,
+        &quot;message&quot;: &quot;string&quot;,
+        &quot;code&quot;: &quot;string&quot;
+      }
+    ]
+  }
+}
+</code></pre>
+<h2>Catalog</h2>
+<table>
+<thead>
+<tr>
+<th>HTTP</th>
+<th><code>error.code</code></th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>400</code></td>
+<td><code>validation_error</code></td>
+<td>Request failed validation</td>
+</tr>
+<tr>
+<td><code>400</code></td>
+<td><code>invalid_or_expired_token</code></td>
+<td>Password reset token invalid</td>
+</tr>
+<tr>
+<td><code>400</code></td>
+<td><code>upload_not_found</code></td>
+<td>Confirm called without valid upload</td>
+</tr>
+<tr>
+<td><code>400</code></td>
+<td><code>upload_mismatch</code></td>
+<td>Confirm metadata does not match intent/object</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td><code>unauthorized</code></td>
+<td>Missing/invalid Bearer token</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td><code>invalid_credentials</code></td>
+<td>Sign-in / change-password failed</td>
+</tr>
+<tr>
+<td><code>403</code></td>
+<td><code>forbidden</code></td>
+<td>Authenticated but not owner of resource</td>
+</tr>
+<tr>
+<td><code>404</code></td>
+<td><code>not_found</code></td>
+<td>Private resource missing</td>
+</tr>
+<tr>
+<td><code>404</code></td>
+<td><code>share_unavailable</code></td>
+<td>Public link dead/disabled/unknown</td>
+</tr>
+<tr>
+<td><code>404</code></td>
+<td><code>share_not_initialized</code></td>
+<td>Disable/regenerate before enable</td>
+</tr>
+<tr>
+<td><code>409</code></td>
+<td><code>email_taken</code></td>
+<td>Sign-up conflict</td>
+</tr>
+<tr>
+<td><code>409</code></td>
+<td><code>file_limit_reached</code></td>
+<td>Max files per project</td>
+</tr>
+<tr>
+<td><code>409</code></td>
+<td><code>project_deleted</code></td>
+<td>Illegal operation on soft-deleted project</td>
+</tr>
+<tr>
+<td><code>409</code></td>
+<td><code>conflict</code></td>
+<td>Generic state conflict</td>
+</tr>
+<tr>
+<td><code>413</code></td>
+<td><code>file_too_large</code></td>
+<td>Over size limit</td>
+</tr>
+<tr>
+<td><code>415</code></td>
+<td><code>unsupported_media_type</code></td>
+<td>MIME not allowed</td>
+</tr>
+<tr>
+<td><code>429</code></td>
+<td><code>rate_limited</code></td>
+<td>Too many requests</td>
+</tr>
+<tr>
+<td><code>500</code></td>
+<td><code>internal_error</code></td>
+<td>Unexpected server failure</td>
+</tr>
+</tbody></table>
+<p><strong>Rules</strong></p>
+<ul>
+<li>Never put stack traces, SQL, or storage paths in <code>message</code> or <code>details</code></li>
+<li>Prefer stable <code>code</code> values for frontend branching</li>
+<li>Use generic credentials messages on auth failure</li>
+</ul>
+<hr>
+<h1>10. Security Rules</h1>
+<ol>
+<li><strong>Ownership validation:</strong> Resolve user → workspace → project before any private mutation or read.  </li>
+<li><strong>Workspace isolation:</strong> Cross-workspace ids return <code>404</code> or <code>403</code> (V1 prefer <code>404</code> for project ids to avoid existence leaks across tenants).  </li>
+<li><strong>Share token validation:</strong> Constant-time compare where applicable; high-entropy tokens; public routes check <code>is_enabled</code> and project not soft-deleted.  </li>
+<li><strong>Archived projects:</strong> Remain owner-accessible and may remain publicly shareable if enabled (Data Model). Soft-deleted projects must not resolve publicly and cannot enable share.  </li>
+<li><strong>Signed download URLs:</strong> Short TTL (recommended 60–300 seconds); method/path constrained to one object.  </li>
+<li><strong>Never expose storage paths,</strong> bucket names, or internal upload keys in JSON.  </li>
+<li><strong>Upload intent binding:</strong> <code>upload_token</code> must be single-use or expire; confirm must verify object.  </li>
+<li><strong>Rate limit</strong> auth and public token endpoints.  </li>
+<li><strong>CORS</strong> only for known frontend origins.  </li>
+<li><strong>No client write APIs</strong> on public routes.</li>
+</ol>
+<hr>
+<h1>11. API Conventions</h1>
+<h2>Pagination</h2>
+<ul>
+<li>Offset pagination: <code>limit</code>, <code>offset</code>, <code>meta.total</code>  </li>
+<li>Used on project list in V1  </li>
+<li>Nested project collections (files/resources/progress) return full arrays within V1 limits (max 50 files; resources/progress unbounded practically but expected small — optional future pagination not in V1)</li>
+</ul>
+<h2>Sorting</h2>
+<table>
+<thead>
+<tr>
+<th>Collection</th>
+<th>Default sort</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Projects</td>
+<td><code>updated_at DESC</code></td>
+</tr>
+<tr>
+<td>Files</td>
+<td><code>created_at DESC</code></td>
+</tr>
+<tr>
+<td>Resources</td>
+<td><code>position ASC</code>, <code>created_at ASC</code></td>
+</tr>
+<tr>
+<td>Progress</td>
+<td><code>created_at DESC</code></td>
+</tr>
+</tbody></table>
+<h2>Filtering</h2>
+<ul>
+<li>Projects: <code>status</code> query param only in V1</li>
+</ul>
+<h2>Date formats</h2>
+<ul>
+<li>ISO-8601 UTC with <code>Z</code></li>
+</ul>
+<h2>Naming</h2>
+<ul>
+<li>Routes: kebab-case for multi-word actions (<code>sign-up</code>, <code>download-url</code>)  </li>
+<li>JSON fields: snake_case  </li>
+<li>Enums: lowercase snake / lowercase words as defined</li>
+</ul>
+<h2>Idempotency</h2>
+<ul>
+<li><code>enable</code> when already enabled: success, same token  </li>
+<li><code>disable</code> when already disabled: success  </li>
+<li><code>DELETE</code> on already soft-deleted project: <code>404</code></li>
+</ul>
+<h2>Versioning</h2>
+<ul>
+<li>Prefix <code>/api/v1</code>  </li>
+<li>Breaking changes require <code>/api/v2</code></li>
+</ul>
+<hr>
+<h1>12. Endpoint Summary</h1>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+<th>Auth</th>
+<th>Surface</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/auth/sign-up</code></td>
+<td>Register owner</td>
+<td>No</td>
+<td>Private API (public access)</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/auth/sign-in</code></td>
+<td>Login</td>
+<td>No</td>
+<td>Public access</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/auth/sign-out</code></td>
+<td>Logout</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/auth/forgot-password</code></td>
+<td>Request reset email</td>
+<td>No</td>
+<td>Public access</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/auth/reset-password</code></td>
+<td>Reset password</td>
+<td>No</td>
+<td>Public access</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/auth/me</code></td>
+<td>Current user + workspace</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>PATCH</code></td>
+<td><code>/api/v1/auth/me</code></td>
+<td>Update display name</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/auth/change-password</code></td>
+<td>Change password</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects</code></td>
+<td>List projects</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects</code></td>
+<td>Create project</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects/{project_id}</code></td>
+<td>Get project</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>PATCH</code></td>
+<td><code>/api/v1/projects/{project_id}</code></td>
+<td>Update overview/status</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/projects/{project_id}</code></td>
+<td>Soft-delete project</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects/{project_id}/files</code></td>
+<td>List files</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects/{project_id}/files/upload-url</code></td>
+<td>Signed upload intent</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects/{project_id}/files/confirm</code></td>
+<td>Confirm upload</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects/{project_id}/files/{file_id}/download-url</code></td>
+<td>Signed download</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/projects/{project_id}/files/{file_id}</code></td>
+<td>Delete file</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects/{project_id}/resources</code></td>
+<td>List resources</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects/{project_id}/resources</code></td>
+<td>Create resource</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>PATCH</code></td>
+<td><code>/api/v1/projects/{project_id}/resources/{resource_id}</code></td>
+<td>Update resource</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/projects/{project_id}/resources/{resource_id}</code></td>
+<td>Delete resource</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/api/v1/projects/{project_id}/resources/order</code></td>
+<td>Reorder resources</td>
+<td>Yes</td>
+<td>Private (optional)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects/{project_id}/progress</code></td>
+<td>List progress</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects/{project_id}/progress</code></td>
+<td>Create progress</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>PATCH</code></td>
+<td><code>/api/v1/projects/{project_id}/progress/{progress_id}</code></td>
+<td>Edit progress</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/v1/projects/{project_id}/progress/{progress_id}</code></td>
+<td>Delete progress</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/projects/{project_id}/share</code></td>
+<td>Get share state</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects/{project_id}/share/enable</code></td>
+<td>Enable sharing</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects/{project_id}/share/disable</code></td>
+<td>Disable sharing</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/projects/{project_id}/share/regenerate</code></td>
+<td>Regenerate token</td>
+<td>Yes</td>
+<td>Private</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/public/{token}</code></td>
+<td>Public project payload</td>
+<td>No</td>
+<td>Public</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/public/{token}/files/{file_id}/download-url</code></td>
+<td>Public download URL</td>
+<td>No</td>
+<td>Public</td>
+</tr>
+</tbody></table>
+<hr>
+<h1>Out of Scope for This API (V1)</h1>
+<p>Aligned with PRD / Data Model non-goals:</p>
+<ul>
+<li>Team/member endpoints  </li>
+<li>Comments, notifications, analytics  </li>
+<li>Billing  </li>
+<li>File versioning  </li>
+<li>Password-protected shares  </li>
+<li>Client accounts  </li>
+<li>Search endpoints  </li>
+<li>Admin/purge APIs</li>
+</ul>
+<hr>
+<h1>Handoff</h1>
+<p>Once approved, this document is the <strong>API source of truth</strong>.</p>
+<p>Frontend and backend must implement against these routes, models, and error codes.</p>
+<p><strong>Next engineering step (when approved):</strong> Backend module/architecture design and/or frontend API client typing — still no implementation code until a milestone is explicitly approved.</p>
+
+
+</body>
+</html>
